@@ -1,7 +1,13 @@
 import { FastifyInstance } from 'fastify';
-import { Type } from '@fastify/type-provider-typebox';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { authenticate } from '../middlewares/auth.middleware';
+import {
+  getAllServiceOrdersSchema,
+  getServiceOrderByIdSchema,
+  createServiceOrderSchema,
+  updateServiceOrderSchema,
+  deleteServiceOrderSchema,
+} from '../types/schema';
 
 interface ServiceOrderRow extends RowDataPacket {
   id: number;
@@ -15,40 +21,16 @@ interface ServiceOrderRow extends RowDataPacket {
   project_name?: string;
 }
 
+interface ProjectRow extends RowDataPacket {
+  id: number;
+  name: string;
+}
+
 export default async function serviceOrderRoutes(
   server: FastifyInstance,
 ): Promise<void> {
   // Authentication hook
   server.addHook('onRequest', authenticate);
-
-  // Schema
-  const serviceOrderSchema = {
-    body: Type.Object({
-      name: Type.String({ minLength: 1 }),
-      category: Type.String({ minLength: 1 }),
-      description: Type.Optional(Type.String()),
-      project_id: Type.Number(),
-      is_approved: Type.Optional(Type.Boolean()),
-    }),
-  };
-
-  // Response schema
-  const serviceOrderResponseSchema = Type.Object({
-    id: Type.Number(),
-    name: Type.String(),
-    category: Type.String(),
-    description: Type.Union([Type.String(), Type.Null()]),
-    project_id: Type.Number(),
-    is_approved: Type.Boolean(),
-    created_date: Type.String(),
-    updated_date: Type.String(),
-  });
-
-  // Extended schema with project info
-  const serviceOrderExtendedSchema = Type.Object({
-    ...serviceOrderResponseSchema.properties,
-    project_name: Type.String(),
-  });
 
   /**
    * Get all service orders
@@ -57,28 +39,18 @@ export default async function serviceOrderRoutes(
    */
   server.get(
     '/',
-    {
-      schema: {
-        querystring: Type.Object({
-          project_id: Type.Optional(Type.Number()),
-        }),
-        response: {
-          200: Type.Array(serviceOrderExtendedSchema),
-        },
-      },
-    },
+    { schema: getAllServiceOrdersSchema },
     async (request, reply) => {
       const { project_id } = request.query as { project_id?: number };
+      const mysql = server.mysql;
+      const connection = await mysql.getConnection();
 
       try {
-        const mysql = server.mysql;
-        const connection = await mysql.getConnection();
-
         let query = `
-        SELECT so.*, p.name as project_name
-        FROM service_orders so
-        JOIN projects p ON so.project_id = p.id
-      `;
+          SELECT so.*, p.name as project_name
+          FROM service_orders so
+          JOIN projects p ON so.project_id = p.id
+        `;
 
         const params = [];
 
@@ -91,7 +63,6 @@ export default async function serviceOrderRoutes(
           query,
           params,
         );
-        connection.release();
 
         reply.send(serviceOrders);
       } catch (err) {
@@ -101,6 +72,8 @@ export default async function serviceOrderRoutes(
           error: 'Internal Server Error',
           message: 'Error retrieving service orders',
         });
+      } finally {
+        connection.release();
       }
     },
   );
@@ -112,43 +85,28 @@ export default async function serviceOrderRoutes(
    */
   server.get(
     '/:id',
-    {
-      schema: {
-        params: Type.Object({
-          id: Type.Number(),
-        }),
-        response: {
-          200: serviceOrderExtendedSchema,
-          404: Type.Object({
-            statusCode: Type.Number(),
-            error: Type.String(),
-            message: Type.String(),
-          }),
-        },
-      },
-    },
+    { schema: getServiceOrderByIdSchema },
     async (request, reply) => {
       const { id } = request.params as { id: number };
+      const mysql = server.mysql;
+      const connection = await mysql.getConnection();
 
       try {
-        const mysql = server.mysql;
-        const connection = await mysql.getConnection();
-
         const [serviceOrders] = await connection.query<ServiceOrderRow[]>(
-          `SELECT so.*, p.name as project_name
-         FROM service_orders so
-         JOIN projects p ON so.project_id = p.id
-         WHERE so.id = ?`,
+          `
+          SELECT so.*, p.name as project_name
+          FROM service_orders so
+          JOIN projects p ON so.project_id = p.id
+          WHERE so.id = ?
+        `,
           [id],
         );
-
-        connection.release();
 
         if (serviceOrders.length === 0) {
           return reply.status(404).send({
             statusCode: 404,
             error: 'Not Found',
-            message: `Service Order with ID ${id} not found`,
+            message: `Service order with ID ${id} not found`,
           });
         }
 
@@ -160,76 +118,66 @@ export default async function serviceOrderRoutes(
           error: 'Internal Server Error',
           message: 'Error retrieving service order',
         });
+      } finally {
+        connection.release();
       }
     },
   );
 
   /**
    * Create a new service order
-   * @param {RequestBody} request.body - The service order's name, category, description, project_id, and is_approved
+   * @param {RequestBody} request.body - The service order details
    * @returns {ServiceOrderRow} The created service order
    */
   server.post(
     '/',
-    {
-      schema: {
-        body: serviceOrderSchema.body,
-        response: {
-          201: serviceOrderResponseSchema,
-        },
-      },
-    },
+    { schema: createServiceOrderSchema },
     async (request, reply) => {
-      const body = request.body as {
+      const {
+        name,
+        category,
+        description = null,
+        project_id,
+        is_approved = false,
+      } = request.body as {
         name: string;
         category: string;
-        description?: string;
+        description?: string | null;
         project_id: number;
         is_approved?: boolean;
       };
 
-      try {
-        const mysql = server.mysql;
-        const connection = await mysql.getConnection();
+      const mysql = server.mysql;
+      const connection = await mysql.getConnection();
 
-        // Validate if project exists
-        const [projects] = await connection.query<RowDataPacket[]>(
+      try {
+        // Verify project exists
+        const [existingProjects] = await connection.query<ProjectRow[]>(
           'SELECT id FROM projects WHERE id = ?',
-          [body.project_id],
+          [project_id],
         );
 
-        if (projects.length === 0) {
-          connection.release();
+        if (existingProjects.length === 0) {
           return reply.status(404).send({
             statusCode: 404,
             error: 'Not Found',
-            message: `Project with ID ${body.project_id} not found`,
+            message: `Project with ID ${project_id} not found`,
           });
         }
 
-        // INSERT
+        // Create record
         const [result] = await connection.query<ResultSetHeader>(
-          `INSERT INTO service_orders
-         (name, category, description, project_id, is_approved)
-         VALUES (?, ?, ?, ?, ?)`,
-          [
-            body.name,
-            body.category,
-            body.description || null,
-            body.project_id,
-            body.is_approved ?? false,
-          ],
+          'INSERT INTO service_orders (name, category, description, project_id, is_approved) VALUES (?, ?, ?, ?, ?)',
+          [name, category, description, project_id, is_approved],
         );
 
         const serviceOrderId = result.insertId;
 
-        // GET
+        // Get the created service order
         const [serviceOrders] = await connection.query<ServiceOrderRow[]>(
           'SELECT * FROM service_orders WHERE id = ?',
           [serviceOrderId],
         );
-
-        connection.release();
 
         reply.status(201).send(serviceOrders[0]);
       } catch (err) {
@@ -239,6 +187,8 @@ export default async function serviceOrderRoutes(
           error: 'Internal Server Error',
           message: 'Error creating service order',
         });
+      } finally {
+        connection.release();
       }
     },
   );
@@ -246,93 +196,71 @@ export default async function serviceOrderRoutes(
   /**
    * Update a service order
    * @param {number} id - The ID of the service order
-   * @param {RequestBody} request.body - The service order's name, category, description, project_id, and is_approved
+   * @param {RequestBody} request.body - The updated service order details
    * @returns {ServiceOrderRow} The updated service order
    */
   server.put(
     '/:id',
-    {
-      schema: {
-        params: Type.Object({
-          id: Type.Number(),
-        }),
-        body: serviceOrderSchema.body,
-        response: {
-          200: serviceOrderResponseSchema,
-          404: Type.Object({
-            statusCode: Type.Number(),
-            error: Type.String(),
-            message: Type.String(),
-          }),
-        },
-      },
-    },
+    { schema: updateServiceOrderSchema },
     async (request, reply) => {
       const { id } = request.params as { id: number };
-      const body = request.body as {
+      const {
+        name,
+        category,
+        description = null,
+        project_id,
+        is_approved = false,
+      } = request.body as {
         name: string;
         category: string;
-        description?: string;
+        description?: string | null;
         project_id: number;
         is_approved?: boolean;
       };
 
-      try {
-        const mysql = server.mysql;
-        const connection = await mysql.getConnection();
+      const mysql = server.mysql;
+      const connection = await mysql.getConnection();
 
-        // Validate if service order exists
+      try {
+        // Verify service order exists
         const [existingOrders] = await connection.query<ServiceOrderRow[]>(
-          'SELECT * FROM service_orders WHERE id = ?',
+          'SELECT id FROM service_orders WHERE id = ?',
           [id],
         );
 
         if (existingOrders.length === 0) {
-          connection.release();
           return reply.status(404).send({
             statusCode: 404,
             error: 'Not Found',
-            message: `Service Order with ID ${id} not found`,
+            message: `Service order with ID ${id} not found`,
           });
         }
 
-        // Validate if project exists
-        const [projects] = await connection.query<RowDataPacket[]>(
+        // Verify project exists
+        const [existingProjects] = await connection.query<ProjectRow[]>(
           'SELECT id FROM projects WHERE id = ?',
-          [body.project_id],
+          [project_id],
         );
 
-        if (projects.length === 0) {
-          connection.release();
+        if (existingProjects.length === 0) {
           return reply.status(404).send({
             statusCode: 404,
             error: 'Not Found',
-            message: `Project with ID ${body.project_id} not found`,
+            message: `Project with ID ${project_id} not found`,
           });
         }
 
-        // UPDATE
-        await connection.query(
-          `UPDATE service_orders
-         SET name = ?, category = ?, description = ?, project_id = ?, is_approved = ?
-         WHERE id = ?`,
-          [
-            body.name,
-            body.category,
-            body.description || null,
-            body.project_id,
-            body.is_approved ?? existingOrders[0].is_approved,
-            id,
-          ],
+        // Update record
+        await connection.query<ResultSetHeader>(
+          'UPDATE service_orders SET name = ?, category = ?, description = ?, project_id = ?, is_approved = ? WHERE id = ?',
+          [name, category, description, project_id, is_approved, id],
         );
 
-        // GET
+        // Get the updated service order
         const [serviceOrders] = await connection.query<ServiceOrderRow[]>(
           'SELECT * FROM service_orders WHERE id = ?',
           [id],
         );
-
-        connection.release();
 
         reply.send(serviceOrders[0]);
       } catch (err) {
@@ -342,58 +270,44 @@ export default async function serviceOrderRoutes(
           error: 'Internal Server Error',
           message: 'Error updating service order',
         });
+      } finally {
+        connection.release();
       }
     },
   );
 
   /**
    * Delete a service order
-   * @param {number} id - The ID of the service order
-   * @returns {null} The deleted service order
+   * @param {number} id - The ID of the service order to delete
    */
   server.delete(
     '/:id',
-    {
-      schema: {
-        params: Type.Object({
-          id: Type.Number(),
-        }),
-        response: {
-          204: Type.Null(),
-          404: Type.Object({
-            statusCode: Type.Number(),
-            error: Type.String(),
-            message: Type.String(),
-          }),
-        },
-      },
-    },
+    { schema: deleteServiceOrderSchema },
     async (request, reply) => {
       const { id } = request.params as { id: number };
+      const mysql = server.mysql;
+      const connection = await mysql.getConnection();
 
       try {
-        const mysql = server.mysql;
-        const connection = await mysql.getConnection();
-
-        // Validate if service order exists
+        // Verify service order exists
         const [existingOrders] = await connection.query<ServiceOrderRow[]>(
-          'SELECT * FROM service_orders WHERE id = ?',
+          'SELECT id FROM service_orders WHERE id = ?',
           [id],
         );
 
         if (existingOrders.length === 0) {
-          connection.release();
           return reply.status(404).send({
             statusCode: 404,
             error: 'Not Found',
-            message: `Service Order with ID ${id} not found`,
+            message: `Service order with ID ${id} not found`,
           });
         }
 
-        // Delete
-        await connection.query('DELETE FROM service_orders WHERE id = ?', [id]);
-
-        connection.release();
+        // Delete record
+        await connection.query<ResultSetHeader>(
+          'DELETE FROM service_orders WHERE id = ?',
+          [id],
+        );
 
         reply.status(204).send();
       } catch (err) {
@@ -403,78 +317,8 @@ export default async function serviceOrderRoutes(
           error: 'Internal Server Error',
           message: 'Error deleting service order',
         });
-      }
-    },
-  );
-
-  /**
-   * Toggle approval status
-   * @param {number} id - The ID of the service order
-   * @returns {ServiceOrderRow} The updated service order
-   */
-  server.patch(
-    '/:id/approve',
-    {
-      schema: {
-        params: Type.Object({
-          id: Type.Number(),
-        }),
-        response: {
-          200: serviceOrderResponseSchema,
-          404: Type.Object({
-            statusCode: Type.Number(),
-            error: Type.String(),
-            message: Type.String(),
-          }),
-        },
-      },
-    },
-    async (request, reply) => {
-      const { id } = request.params as { id: number };
-
-      try {
-        const mysql = server.mysql;
-        const connection = await mysql.getConnection();
-
-        // Validate if service order exists
-        const [existingOrders] = await connection.query<ServiceOrderRow[]>(
-          'SELECT * FROM service_orders WHERE id = ?',
-          [id],
-        );
-
-        if (existingOrders.length === 0) {
-          connection.release();
-          return reply.status(404).send({
-            statusCode: 404,
-            error: 'Not Found',
-            message: `Service Order with ID ${id} not found`,
-          });
-        }
-
-        const newApprovalStatus = !existingOrders[0].is_approved;
-
-        // UPDATE
-        await connection.query(
-          'UPDATE service_orders SET is_approved = ? WHERE id = ?',
-          [newApprovalStatus, id],
-        );
-
-        // GET
-        const [serviceOrders] = await connection.query<ServiceOrderRow[]>(
-          'SELECT * FROM service_orders WHERE id = ?',
-          [id],
-        );
-
+      } finally {
         connection.release();
-
-        reply.send(serviceOrders[0]);
-      } catch (err) {
-        server.log.error(err);
-        reply.status(500).send({
-          statusCode: 500,
-          error: 'Internal Server Error',
-          message: 'Error updating approval status',
-        });
       }
     },
   );
