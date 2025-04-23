@@ -17,14 +17,20 @@ const server: FastifyInstance = Fastify({
   },
 }).withTypeProvider<TypeBoxTypeProvider>();
 
-registerPlugins(server);
-
-registerRoutes(server);
+const setup = async () => {
+  await registerPlugins(server);
+  await registerRoutes(server);
+};
 
 const start = async () => {
   try {
+    // Set up plugins and routes
+    await setup();
+
+    // Start the server
     await server.listen({ port: config.port, host: '0.0.0.0' });
     server.log.info(`Server is running on port ${config.port}`);
+    server.log.info('Swagger documentation available at /api-docs');
   } catch (err) {
     server.log.error(err);
     process.exit(1);

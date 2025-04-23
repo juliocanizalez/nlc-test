@@ -1,7 +1,7 @@
-import { FastifyInstance } from 'fastify';
-import { Type } from '@fastify/type-provider-typebox';
+import fastify, { FastifyInstance } from 'fastify';
 import bcrypt from 'bcrypt';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
+import { registerSchema, loginSchema } from '../types/schema';
 
 interface UserRow extends RowDataPacket {
   id: number;
@@ -19,40 +19,6 @@ interface RequestBody {
 export default async function authRoutes(
   server: FastifyInstance,
 ): Promise<void> {
-  // Register schema
-  const registerSchema = {
-    body: Type.Object({
-      username: Type.String({ minLength: 3 }),
-      password: Type.String({ minLength: 6 }),
-      email: Type.String({ format: 'email' }),
-    }),
-    response: {
-      201: Type.Object({
-        id: Type.Number(),
-        username: Type.String(),
-        email: Type.String(),
-      }),
-    },
-  };
-
-  // Login schema
-  const loginSchema = {
-    body: Type.Object({
-      username: Type.String(),
-      password: Type.String(),
-    }),
-    response: {
-      200: Type.Object({
-        token: Type.String(),
-        user: Type.Object({
-          id: Type.Number(),
-          username: Type.String(),
-          email: Type.String(),
-        }),
-      }),
-    },
-  };
-
   /**
    * Registers a new user
    * @param {RequestBody} request.body - The user's username, password, and email

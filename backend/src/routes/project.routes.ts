@@ -1,7 +1,13 @@
 import { FastifyInstance } from 'fastify';
-import { Type } from '@fastify/type-provider-typebox';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { authenticate } from '../middlewares/auth.middleware';
+import {
+  getAllProjectsSchema,
+  getProjectByIdSchema,
+  createProjectSchema,
+  updateProjectSchema,
+  deleteProjectSchema,
+} from '../types/schema';
 
 interface ProjectRow extends RowDataPacket {
   id: number;
@@ -17,56 +23,31 @@ export default async function projectRoutes(
   // Add authentication to all routes
   server.addHook('onRequest', authenticate);
 
-  // Schema
-  const projectSchema = {
-    body: Type.Object({
-      name: Type.String({ minLength: 1 }),
-      description: Type.Optional(Type.String()),
-    }),
-  };
-
-  // Response schema
-  const projectResponseSchema = Type.Object({
-    id: Type.Number(),
-    name: Type.String(),
-    description: Type.Union([Type.String(), Type.Null()]),
-    created_at: Type.String(),
-    updated_at: Type.String(),
-  });
-
   /**
    * Get all projects
    * @returns {ProjectRow[]} All projects
    */
-  server.get(
-    '/',
-    {
-      schema: {
-        response: {
-          200: Type.Array(projectResponseSchema),
-        },
-      },
-    },
-    async (request, reply) => {
-      try {
-        const mysql = server.mysql;
-        const connection = await mysql.getConnection();
-        const [projects] = await connection.query<ProjectRow[]>(
-          'SELECT * FROM projects',
-        );
-        connection.release();
+  server.get('/', { schema: getAllProjectsSchema }, async (request, reply) => {
+    const mysql = server.mysql;
+    const connection = await mysql.getConnection();
 
-        reply.send(projects);
-      } catch (err) {
-        server.log.error(err);
-        reply.status(500).send({
-          statusCode: 500,
-          error: 'Internal Server Error',
-          message: 'Error retrieving projects',
-        });
-      }
-    },
-  );
+    try {
+      const [projects] = await connection.query<ProjectRow[]>(
+        'SELECT * FROM projects',
+      );
+
+      reply.send(projects);
+    } catch (err) {
+      server.log.error(err);
+      reply.status(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: 'Error retrieving projects',
+      });
+    } finally {
+      connection.release();
+    }
+  });
 
   /**
    * Get project by ID
@@ -75,32 +56,17 @@ export default async function projectRoutes(
    */
   server.get(
     '/:id',
-    {
-      schema: {
-        params: Type.Object({
-          id: Type.Number(),
-        }),
-        response: {
-          200: projectResponseSchema,
-          404: Type.Object({
-            statusCode: Type.Number(),
-            error: Type.String(),
-            message: Type.String(),
-          }),
-        },
-      },
-    },
+    { schema: getProjectByIdSchema },
     async (request, reply) => {
       const { id } = request.params as { id: number };
+      const mysql = server.mysql;
+      const connection = await mysql.getConnection();
 
       try {
-        const mysql = server.mysql;
-        const connection = await mysql.getConnection();
         const [projects] = await connection.query<ProjectRow[]>(
           'SELECT * FROM projects WHERE id = ?',
           [id],
         );
-        connection.release();
 
         if (projects.length === 0) {
           return reply.status(404).send({
@@ -118,6 +84,8 @@ export default async function projectRoutes(
           error: 'Internal Server Error',
           message: 'Error retrieving project',
         });
+      } finally {
+        connection.release();
       }
     },
   );
@@ -127,95 +95,70 @@ export default async function projectRoutes(
    * @param {RequestBody} request.body - The project's name and description
    * @returns {ProjectRow} The created project
    */
-  server.post(
-    '/',
-    {
-      schema: {
-        body: projectSchema.body,
-        response: {
-          201: projectResponseSchema,
-        },
-      },
-    },
-    async (request, reply) => {
-      const { name, description } = request.body as {
-        name: string;
-        description?: string;
-      };
+  server.post('/', { schema: createProjectSchema }, async (request, reply) => {
+    const { name, description = null } = request.body as {
+      name: string;
+      description?: string | null;
+    };
 
-      try {
-        const mysql = server.mysql;
-        const connection = await mysql.getConnection();
-        const [result] = await connection.query<ResultSetHeader>(
-          'INSERT INTO projects (name, description) VALUES (?, ?)',
-          [name, description || null],
-        );
+    const mysql = server.mysql;
+    const connection = await mysql.getConnection();
 
-        const projectId = result.insertId;
+    try {
+      // Create record
+      const [result] = await connection.query<ResultSetHeader>(
+        'INSERT INTO projects (name, description) VALUES (?, ?)',
+        [name, description],
+      );
 
-        // Get the created project
-        const [projects] = await connection.query<ProjectRow[]>(
-          'SELECT * FROM projects WHERE id = ?',
-          [projectId],
-        );
+      const projectId = result.insertId;
 
-        connection.release();
+      // Get the created project
+      const [projects] = await connection.query<ProjectRow[]>(
+        'SELECT * FROM projects WHERE id = ?',
+        [projectId],
+      );
 
-        reply.status(201).send(projects[0]);
-      } catch (err) {
-        server.log.error(err);
-        reply.status(500).send({
-          statusCode: 500,
-          error: 'Internal Server Error',
-          message: 'Error creating project',
-        });
-      }
-    },
-  );
+      reply.status(201).send(projects[0]);
+    } catch (err) {
+      server.log.error(err);
+      reply.status(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: 'Error creating project',
+      });
+    } finally {
+      connection.release();
+    }
+  });
 
   /**
    * Update a project
    * @param {number} id - The ID of the project
-   * @param {RequestBody} request.body - The project's name and description
+   * @param {RequestBody} request.body - The updated name and description
    * @returns {ProjectRow} The updated project
    */
   server.put(
     '/:id',
-    {
-      schema: {
-        params: Type.Object({
-          id: Type.Number(),
-        }),
-        body: projectSchema.body,
-        response: {
-          200: projectResponseSchema,
-          404: Type.Object({
-            statusCode: Type.Number(),
-            error: Type.String(),
-            message: Type.String(),
-          }),
-        },
-      },
-    },
+    { schema: updateProjectSchema },
     async (request, reply) => {
       const { id } = request.params as { id: number };
-      const { name, description } = request.body as {
+      const { name, description = null } = request.body as {
         name: string;
-        description?: string;
+        description?: string | null;
       };
 
-      try {
-        const mysql = server.mysql;
-        const connection = await mysql.getConnection();
+      const mysql = server.mysql;
+      const connection = await mysql.getConnection();
 
-        // Validate if project exists
+      try {
+        // Verify project exists
         const [existingProjects] = await connection.query<ProjectRow[]>(
-          'SELECT * FROM projects WHERE id = ?',
+          'SELECT id FROM projects WHERE id = ?',
           [id],
         );
 
         if (existingProjects.length === 0) {
-          connection.release();
           return reply.status(404).send({
             statusCode: 404,
             error: 'Not Found',
@@ -223,19 +166,17 @@ export default async function projectRoutes(
           });
         }
 
-        // Update
-        await connection.query(
+        // Update record
+        await connection.query<ResultSetHeader>(
           'UPDATE projects SET name = ?, description = ? WHERE id = ?',
-          [name, description || null, id],
+          [name, description, id],
         );
 
-        // Get updated project
+        // Get the updated project
         const [projects] = await connection.query<ProjectRow[]>(
           'SELECT * FROM projects WHERE id = ?',
           [id],
         );
-
-        connection.release();
 
         reply.send(projects[0]);
       } catch (err) {
@@ -245,6 +186,8 @@ export default async function projectRoutes(
           error: 'Internal Server Error',
           message: 'Error updating project',
         });
+      } finally {
+        connection.release();
       }
     },
   );
@@ -252,40 +195,23 @@ export default async function projectRoutes(
   /**
    * Delete a project
    * @param {number} id - The ID of the project
-   * @returns {null} The deleted project
    */
   server.delete(
     '/:id',
-    {
-      schema: {
-        params: Type.Object({
-          id: Type.Number(),
-        }),
-        response: {
-          204: Type.Null(),
-          404: Type.Object({
-            statusCode: Type.Number(),
-            error: Type.String(),
-            message: Type.String(),
-          }),
-        },
-      },
-    },
+    { schema: deleteProjectSchema },
     async (request, reply) => {
       const { id } = request.params as { id: number };
+      const mysql = server.mysql;
+      const connection = await mysql.getConnection();
 
       try {
-        const mysql = server.mysql;
-        const connection = await mysql.getConnection();
-
-        // Validate if project exists
+        // Verify project exists
         const [existingProjects] = await connection.query<ProjectRow[]>(
-          'SELECT * FROM projects WHERE id = ?',
+          'SELECT id FROM projects WHERE id = ?',
           [id],
         );
 
         if (existingProjects.length === 0) {
-          connection.release();
           return reply.status(404).send({
             statusCode: 404,
             error: 'Not Found',
@@ -293,10 +219,11 @@ export default async function projectRoutes(
           });
         }
 
-        // Delete project
-        await connection.query('DELETE FROM projects WHERE id = ?', [id]);
-
-        connection.release();
+        // Delete record
+        await connection.query<ResultSetHeader>(
+          'DELETE FROM projects WHERE id = ?',
+          [id],
+        );
 
         reply.status(204).send();
       } catch (err) {
@@ -306,6 +233,8 @@ export default async function projectRoutes(
           error: 'Internal Server Error',
           message: 'Error deleting project',
         });
+      } finally {
+        connection.release();
       }
     },
   );
