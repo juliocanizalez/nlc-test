@@ -37,7 +37,6 @@ service-order-management-api/
 ├── Dockerfile                      # Docker configuration
 ├── package.json                    # NPM package configuration
 ├── postgrator.config.js            # Postgrator configuration
-├── postman_collection.json         # Postman collection
 ├── README.md                       # This file
 └── tsconfig.json                   # TypeScript configuration
 ```
