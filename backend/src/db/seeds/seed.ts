@@ -1,11 +1,13 @@
 import { createConnection } from 'mysql2/promise';
-import Postgrator from 'postgrator';
 import bcrypt from 'bcrypt';
 import config from '../../config/config';
-import path from 'path';
+import runMigrations from '../migrations';
 
 async function seed() {
   try {
+    // Separate migrations and seeds
+    await runMigrations();
+
     const dbConfig = {
       host: config.database.host,
       port: config.database.port,
@@ -15,30 +17,6 @@ async function seed() {
     };
 
     const connection = await createConnection(dbConfig);
-
-    const postgrator = new Postgrator({
-      migrationPattern: path.join(__dirname, '../migrations/*'),
-      driver: 'mysql',
-      database: config.database.database,
-      schemaTable: 'postgrator_schema_version',
-      execQuery: async (query) => {
-        const [rows] = await connection.query(query);
-        return { rows: Array.isArray(rows) ? rows : [rows] };
-      },
-      execSqlScript: async (sqlScript) => {
-        // Split the script into individual statements to run them separately
-        const statements = sqlScript.split(';').filter((stmt) => stmt.trim());
-        for (const stmt of statements) {
-          if (stmt.trim()) {
-            await connection.query(stmt + ';');
-          }
-        }
-      },
-    });
-
-    console.log('Running migrations before seeding...');
-    const appliedMigrations = await postgrator.migrate();
-    console.log('Migrations completed:', appliedMigrations);
 
     console.log('Seeding database...');
 
