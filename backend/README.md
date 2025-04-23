@@ -122,7 +122,31 @@ Make sure your package.json has the correct build and start scripts:
 
 ## API Documentation
 
-The API documentation is available at http://localhost:3000/api-docs when the server is running.
+The API documentation is available at http://localhost:3000/api-docs when the server is running. The documentation is generated using Swagger/OpenAPI and provides a comprehensive interface to:
+
+- Browse all available endpoints
+- View request/response schemas
+- Test API endpoints directly from the browser
+- See authentication requirements for each endpoint
+- View detailed descriptions of parameters and responses
+
+### Swagger Features
+
+The Swagger documentation includes:
+
+- Detailed descriptions of all endpoints
+- Request and response schemas
+- Authentication requirements
+- Example requests
+- Data models
+- Try-it-out functionality to test endpoints directly
+
+### Testing with Swagger UI
+
+1. Navigate to http://localhost:3000/api-docs in your browser
+2. For protected endpoints, click the "Authorize" button and enter your JWT token in the format: `Bearer <your-token>`
+3. Explore available endpoints grouped by tags (Auth, Projects, Service Orders)
+4. Use the "Try it out" feature to test endpoints directly from the browser
 
 ### Authentication
 
