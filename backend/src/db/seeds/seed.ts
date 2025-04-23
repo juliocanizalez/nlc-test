@@ -22,14 +22,25 @@ async function seed() {
 
     // Seed Users
     const hashedPassword = await bcrypt.hash('password123', 10);
-    await connection.execute(
-      `
-        INSERT INTO users (username, password, email)
-        VALUES (?, ?, ?)
-      `,
-      ['admin', hashedPassword, 'admin@example.com'],
+
+    // Check if user already exists
+    const [existingUsers] = await connection.execute(
+      'SELECT * FROM users WHERE username = ?',
+      ['admin'],
     );
-    console.log('Added user: admin');
+
+    if (Array.isArray(existingUsers) && existingUsers.length === 0) {
+      await connection.execute(
+        `
+          INSERT INTO users (username, password, email)
+          VALUES (?, ?, ?)
+        `,
+        ['admin', hashedPassword, 'admin@example.com'],
+      );
+      console.log('Added user: admin');
+    } else {
+      console.log('User admin already exists, skipping insertion');
+    }
 
     // Seed Projects
     await connection.execute(`
