@@ -17,7 +17,7 @@ services:
       - JWT_SECRET=jwt_development
 
   db:
-    image: mysql:latest
+    image: mysql:8.0
     restart: unless-stopped
     ports:
       - '3306:3306'
