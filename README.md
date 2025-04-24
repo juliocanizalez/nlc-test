@@ -47,27 +47,17 @@ The easiest way to run the entire application stack is using Docker Compose:
 1. Clone the repository:
 
    ```
-   git clone <repository-url>
-   cd <repository-directory>
+   git clone https://github.com/juliocanizalez/nlc-test
+   cd nlc-test
    ```
 
-2. Create a `.env` file in the root directory (optional, defaults will be used if not provided):
+2. Build and start the containers:
 
    ```
-   DB_DATABASE=nlc_db
-   DB_USER=user
-   DB_PASSWORD=password
-   MYSQL_ROOT_PASSWORD=rootpassword
-   JWT_SECRET=your_jwt_secret_key
+   docker-compose down && docker-compose build --no-cache && docker-compose up -d
    ```
 
-3. Build and start the containers:
-
-   ```
-   docker-compose up -d
-   ```
-
-4. Access the application:
+3. Access the application:
    - Frontend: http://localhost
    - Backend API: http://localhost:3000
 
@@ -92,9 +82,9 @@ The easiest way to run the entire application stack is using Docker Compose:
    ```
    DB_HOST=localhost
    DB_PORT=3306
-   DB_DATABASE=nlc_db
-   DB_USER=your_user
-   DB_PASSWORD=your_password
+   DB_DATABASE=service_order_db
+   DB_USER=dev
+   DB_PASSWORD=password123!
    JWT_SECRET=your_jwt_secret
    ```
 
@@ -203,7 +193,3 @@ The application uses the following environment variables:
 ### Frontend
 
 - `VITE_API_URL` - URL of the backend API
-
-## License
-
-[MIT](LICENSE)
